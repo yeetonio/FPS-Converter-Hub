@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>FPS Converter Hub — Controller Edition</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+:root{--neon:#19a6ff;--accent:#00d4ff;--muted:#7fb1e6}
+body{margin:0;font-family:Inter,Arial,sans-serif;background:linear-gradient(180deg,#000,#071022);color:#e6f7ff}
+.app{max-width:1100px;margin:18px auto;padding:16px}
+.header{display:flex;justify-content:space-between;align-items:center}
+.logo{width:56px;height:56px;border-radius:10px;background:linear-gradient(180deg,#00121b,#00304a);display:flex;align-items:center;justify-content:center;font-weight:700;color:white}
+.h1{font-family:Orbitron,Inter,sans-serif;color:var(--neon);margin:0}
+.card{background:linear-gradient(180deg,#0b0f14,#04101a);padding:14px;border-radius:10px}
+.layout{display:grid;grid-template-columns:360px 1fr;gap:14px}
+.input,select{width:100%;padding:10px;border-radius:8px;border:none;background:#041528;color:#e6f7ff}
+.btn{padding:10px;border-radius:8px;border:none;background:linear-gradient(90deg,var(--neon),var(--accent));color:#02121a;cursor:pointer}
+.result{background:#081426;padding:12px;border-radius:8px;font-family:monospace}
+.graph-wrap{display:none;margin-top:12px}
+@media(max-width:980px){.layout{grid-template-columns:1fr}}
+</style>
+</head><body>
+<div class="app">
+  <div class="header"><div style="display:flex;gap:12px;align-items:center"><div class="logo">S</div><div><h1 class="h1">FPS Converter Hub</h1><div style="color:var(--muted);font-size:13px">Controller Edition • Log scale • © 2025 Yeetonio</div></div></div><div><button id="convert" class="btn">Convert</button></div></div>
+  <div class="layout" style="margin-top:12px">
+    <div class="card">
+      <div style="margin-bottom:8px"><label>Source Game</label><select id="src_game" class="input"></select></div>
+      <div style="margin-bottom:8px"><label>Source Curve</label><select id="src_curve" class="input"></select></div>
+      <div style="margin-bottom:8px"><label>H / V Sens</label><div style="display:flex;gap:8px"><input id="src_h" class="input" type="number" value="7"/><input id="src_v" class="input" type="number" value="7"/></div></div>
+      <div style="margin-bottom:8px"><label>FOV</label><input id="src_fov" class="input" type="number" value="90"/></div>
+      <div style="margin-bottom:8px"><label>Target Game</label><select id="tgt_game" class="input"></select></div>
+      <div style="margin-bottom:8px"><label>Target Curve</label><select id="tgt_curve" class="input"></select></div>
+      <div style="display:flex;gap:8px"><button id="showGraph" class="btn">Show Graph</button><button id="aboutBtn" class="btn" style="background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)">About</button></div>
+    </div>
+    <div>
+      <div class="card">
+        <div style="margin-bottom:8px"><strong>Conversion Output</strong><div style="color:var(--muted);font-size:13px">Controller, logarithmic normalization</div></div>
+        <pre id="output" class="result">Press Convert</pre>
+        <pre id="diagnostics" class="result" style="margin-top:8px;min-height:80px">—</pre>
+        <div class="graph-wrap" id="graphWrap"><canvas id="chart" height="220"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- overlay -->
+<div id="overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(6px);align-items:center;justify-content:center">
+  <div style="background:#061522;padding:18px;border-radius:10px;max-width:800px;margin:40px auto;color:#cfefff">
+    <div style="display:flex;justify-content:space-between"><div style="font-family:Orbitron;color:var(--neon)">Advanced Conversion Details</div><button id="closeOverlay" class="btn" style="background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)">Close</button></div>
+    <div id="advContent" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<script>
+const GAME_CURVES = {
+  cod:['standard','dynamic','linear'],
+  the_finals:['linear','exponential','sinusoidal'],
+  bf6:['standard','linear','bf4','bf1','bf3','bfbc','bfbc2','bfv','2042_old'],
+  bf2042:['standard','linear','bf4','bf1','bf3','bfbc','bfbc2','bfv','2042_old'],
+  valorant:['standard','linear','light','medium','heavy','extreme'],
+  apex:['classic','steady','fine_aim','high_velocity','linear'],
+  csgo:['standard'],
+  r6:['standard'],
+  fragpunk:['standard','linearplus'],
+  bops7:['standard','linear','exponential']
+};
+const CURVE_SHAPES = {
+  linear:[0,0.1,0,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1],
+  standard:[0,0.02,0.07,0.16,0.29,0.45,0.61,0.76,0.88,0.96,1],
+  dynamic:[0,0.01,0.04,0.09,0.18,0.30,0.48,0.70,0.88,0.97,1],
+  exponential:[0,0.006,0.02,0.07,0.16,0.33,0.57,0.79,0.92,0.98,1],
+  sinusoidal:[0,0.015,0.05,0.12,0.25,0.45,0.66,0.82,0.92,0.98,1],
+  bf4:[0,0.03,0.08,0.18,0.32,0.49,0.66,0.80,0.9,0.97,1],
+  bf1:[0,0.02,0.06,0.14,0.27,0.44,0.61,0.77,0.89,0.96,1],
+  bf3:[0,0.03,0.09,0.2,0.35,0.52,0.68,0.82,0.91,0.97,1],
+  bfbc:[0,0.025,0.07,0.16,0.3,0.48,0.66,0.8,0.9,0.97,1],
+  bfbc2:[0,0.028,0.075,0.18,0.33,0.5,0.67,0.81,0.9,0.98,1],
+  bfv:[0,0.02,0.06,0.15,0.28,0.46,0.63,0.78,0.89,0.96,1],
+  '2042_old':[0,0.005,0.02,0.06,0.14,0.32,0.55,0.78,0.92,0.98,1],
+  light:[0,0.04,0.09,0.18,0.33,0.5,0.67,0.8,0.9,0.97,1],
+  medium:[0,0.03,0.08,0.17,0.31,0.48,0.65,0.79,0.9,0.97,1],
+  heavy:[0,0.02,0.06,0.14,0.27,0.44,0.61,0.77,0.89,0.96,1],
+  extreme:[0,0.01,0.04,0.09,0.18,0.3,0.48,0.7,0.88,0.97,1],
+  classic:[0,0.03,0.09,0.18,0.31,0.48,0.65,0.8,0.9,0.97,1],
+  steady:[0,0.02,0.06,0.14,0.27,0.44,0.61,0.77,0.89,0.96,1],
+  fine_aim:[0,0.01,0.03,0.08,0.2,0.4,0.6,0.78,0.9,0.97,1],
+  high_velocity:[0,0.05,0.12,0.25,0.42,0.6,0.75,0.86,0.93,0.98,1],
+  linearplus:[0,0.04,0.11,0.21,0.34,0.5,0.66,0.79,0.9,0.97,1]
+};
+const GAME_RANGE = {cod:[1,20],bops7:[0.1,2.0],bf6:[1,100],bf2042:[1,100],the_finals:[1,10],apex:[1,10],valorant:[1,10],csgo:[1,10],r6:[1,10],fragpunk:[1,10]};
+
+function populate(selId,game){
+  const el=document.getElementById(selId); el.innerHTML=''; (GAME_CURVES[game]||['linear']).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());el.appendChild(o);});
+}
+
+function logNorm(val,game){const r=GAME_RANGE[game]||[1,100];const min=r[0],max=r[1];const v=Math.max(min,Math.min(max,parseFloat(val)||min));const lnMin=Math.log(min+1),lnMax=Math.log(max+1),lnV=Math.log(v+1);return (lnV-lnMin)/(lnMax-lnMin);}
+function logDenorm(norm,game){const r=GAME_RANGE[game]||[1,100];const min=r[0],max=r[1];const lnMin=Math.log(min+1),lnMax=Math.log(max+1);const lnV=lnMin+norm*(lnMax-lnMin);const v=Math.exp(lnV)-1;const decimals=(max-min)<10?2:1;return parseFloat(Math.max(min,Math.min(max,v)).toFixed(decimals));}
+function vecDist(a,b){let s=0;for(let i=0;i<11;i++){const d=((a[i]||0)-(b[i]||0));s+=d*d;}return Math.sqrt(s);}
+function findClosest(srcGame,srcCurve,tgtGame){
+  if(srcCurve==='dynamic' && (srcGame in {cod:1,bf6:1,the_finals:1}) ){
+    const map={'cod':{bf6:'bfv',the_finals:'exponential'},'bf6':{cod:'dynamic',the_finals:'exponential'},'the_finals':{cod:'dynamic',bf6:'bfv'}};
+    if(map[srcGame] && map[srcGame][tgtGame]) return map[srcGame][tgtGame];
+  }
+  const srcArr=CURVE_SHAPES[srcCurve]||CURVE_SHAPES.linear;
+  const candidates=GAME_CURVES[tgtGame]||['linear']; let best=null,bs=1e9;
+  candidates.forEach(k=>{const s=vecDist(srcArr,CURVE_SHAPES[k]||CURVE_SHAPES.linear); if(s<bs){bs=s;best=k;}});
+  return best||'linear';
+}
+
+function convert(){
+  const src=document.getElementById('src_game').value;
+  const tgt=document.getElementById('tgt_game').value;
+  const h=parseFloat(document.getElementById('src_h').value)||0; const v=parseFloat(document.getElementById('src_v').value)||0;
+  const srcCurve=document.getElementById('src_curve').value; const fov=parseFloat(document.getElementById('src_fov').value)||90;
+  const avg=(h+v)/2;
+  const norm=logNorm(avg,src);
+  const baseYaw={cod:205,bf6:158,the_finals:178,apex:190,valorant:170,csgo:210,r6:150,fragpunk:180,bops7:205,bf2042:158};
+  const srcYaw=baseYaw[src]||180; const tgtYaw=baseYaw[tgt]||180;
+  const fovFactor=(90/fov)/(90/90);
+  let tgtNorm=norm*(srcYaw/tgtYaw)*fovFactor; tgtNorm=Math.max(0,Math.min(1,tgtNorm));
+  const tgtSens=logDenorm(tgtNorm,tgt);
+  const closest=findClosest(src,srcCurve,tgt);
+  document.getElementById('output').textContent=`Source: ${src.toUpperCase()} (${srcCurve}) — Avg ${avg}\nNormalized: ${norm.toFixed(4)}\nTarget: ${tgt.toUpperCase()} — Closest Curve: ${closest}\nSuggested Sens: ${tgtSens}`;
+  document.getElementById('diagnostics').textContent=JSON.stringify({src,srcCurve,avg,norm,tgt,tgtNorm,tgtSens,closest},null,2);
+  // save
+  localStorage.setItem('fps_last',JSON.stringify({src,srcCurve,avg,fov,tgt,closest}));
+}
+
+document.getElementById('convert').addEventListener('click',convert);
+document.getElementById('showGraph').addEventListener('click',()=>{
+  const src=document.getElementById('src_game').value; const tgt=document.getElementById('tgt_game').value;
+  const s=document.getElementById('src_curve').value; const t=document.getElementById('tgt_curve').value;
+  const srcArr=CURVE_SHAPES[s]||CURVE_SHAPES.linear; const tgtArr=CURVE_SHAPES[t]||CURVE_SHAPES.linear;
+  document.getElementById('graphWrap').style.display='block';
+  if(window._chart) window._chart.destroy();
+  const ctx=document.getElementById('chart').getContext('2d');
+  window._chart=new Chart(ctx,{type:'line',data:{labels:['0%','10%','20%','30%','40%','50%','60%','70%','80%','90%','100%'],datasets:[{label:'Source',data:srcArr,borderColor:'#19a6ff',tension:0.3},{label:'Target',data:tgtArr,borderColor:'#00ffd1',tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#cfefff'}}},scales:{x:{ticks:{color:'#cfefff'}},y:{ticks:{color:'#cfefff'}}}}});
+});
+
+document.getElementById('aboutBtn').addEventListener('click',()=>{
+  document.getElementById('overlay').style.display='flex';
+  document.getElementById('advContent').innerHTML=`<strong>FPS Converter Hub — Controller Edition v3</strong><p>Logarithmic normalization for controller sensitivities. Default FOV 90°.</p>`;
+});
+document.getElementById('closeOverlay').addEventListener('click',()=>{document.getElementById('overlay').style.display='none'});
+
+window.addEventListener('DOMContentLoaded',()=>{
+  // populate selects
+  const srcSelect=document.getElementById('src_game'); const tgtSelect=document.getElementById('tgt_game');
+  Object.keys(GAME_CURVES).forEach(g=>{const o=document.createElement('option');o.value=g;o.textContent=g.toUpperCase();srcSelect.appendChild(o);const o2=document.createElement('option');o2.value=g;o2.textContent=g.toUpperCase();tgtSelect.appendChild(o2);});
+  populate('src_curve',srcSelect.value); populate('tgt_curve',tgtSelect.value);
+  // restore last
+  try{const last=JSON.parse(localStorage.getItem('fps_last')||'null'); if(last){document.getElementById('src_game').value=last.src; populate('src_curve',last.src); document.getElementById('src_curve').value=last.srcCurve||document.getElementById('src_curve').value; document.getElementById('src_h').value=last.avg||7; document.getElementById('src_v').value=last.avg||7; document.getElementById('src_fov').value=last.fov||90; document.getElementById('tgt_game').value=last.tgt; populate('tgt_curve',last.tgt); document.getElementById('tgt_curve').value=last.closest||document.getElementById('tgt_curve').value;} }catch(e){}
+});
+
+function populate(id,game){const el=document.getElementById(id);el.innerHTML='';(GAME_CURVES[game]||['linear']).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());el.appendChild(o);});}
+</script>
+</body></html>
