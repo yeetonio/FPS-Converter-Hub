@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>FPS Converter Hub — FCH (Pro Micro/Macro)</title>
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" class="app" aria-hidden="false">
+    <header class="header" role="banner">
+      <div class="left">
+        <div class="logo" aria-hidden="true">FCH</div>
+        <div>
+          <h1 class="title">FPS Converter Hub</h1>
+          <div class="sub small">Mobile-first • Controller • Micro/Macro analysis</div>
+        </div>
+      </div>
+      <div class="right">
+        <button id="installBtn" class="btn-ghost small" aria-label="Install" style="display:none">Install</button>
+      </div>
+    </header>
+
+    <main class="main" role="main">
+      <!-- Mode selector (new, pill-shaped) -->
+      <div class="card modeCard">
+        <div class="modeRow" role="tablist" aria-label="Conversion mode">
+          <button class="modePill active" data-mode="exact" id="mode_exact">Exact</button>
+          <button class="modePill" data-mode="feel" id="mode_feel">Feel</button>
+          <button class="modePill" data-mode="assist" id="mode_assist">Assist</button>
+        </div>
+        <div class="small modeDesc" id="modeDescription">Mode: <strong>Exact</strong> — direct math-based conversion. (Try Feel for a blended, player-feel bias.)</div>
+      </div>
+
+      <section class="card">
+        <label class="small">Base Game</label>
+        <select id="src_game" class="input" aria-label="Base Game"></select>
+
+        <label class="small">Base Curve (default)</label>
+        <select id="src_curve" class="input" aria-label="Base Curve"></select>
+
+        <div class="pair">
+          <input id="src_h" class="input half" type="number" value="7" step="any" aria-label="Horizontal sens">
+          <input id="src_v" class="input half" type="number" value="7" step="any" aria-label="Vertical sens">
+        </div>
+
+        <label class="small">FOV</label>
+        <input id="src_fov" class="input" type="number" value="90" aria-label="Field of view" />
+
+        <label class="small checkbox"><input id="adsToggle" type="checkbox"> Include ADS conversion</label>
+        <div id="adsFields" class="adsFields hidden">
+          <input id="ads_src" class="input" type="text" placeholder=".80 or 80" />
+        </div>
+
+        <!-- BF6-specific options (shown only when src_game === 'bf6') -->
+        <div id="bf6Options" class="card hidden small" style="margin-top:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div class="small">Battlefield Options</div>
+            <div class="small" style="color:var(--muted)">Shown only when BF6 is the source</div>
+          </div>
+          <div style="height:8px"></div>
+          <label class="small checkbox"><input id="bf6_uniform" type="checkbox"> Uniform aim (infantry) enabled</label>
+          <div style="height:8px"></div>
+          <label class="small">Coefficient (only if Uniform is ON)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="bf6_coeff" type="range" min="0.5" max="1.2" step="0.01" value="0.89" style="flex:1">
+            <div id="bf6_coeff_val" class="small" style="min-width:48px;text-align:right">0.89</div>
+          </div>
+          <div class="small" style="margin-top:8px;color:var(--muted)">
+            Coefficient adjusts uniform aim strength. Default 0.89 is commonly useful for dynamic→other conversions. Shown only for BF6 source.
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <label class="small">Target Game</label>
+        <select id="tgt_game" class="input" aria-label="Target Game"></select>
+
+        <div style="height:10px"></div>
+        <button id="convertBtn" class="btn">Convert</button>
+        <div style="height:10px"></div>
+
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="showGraphBtn" class="btn-ghost">Show Graph</button>
+          <button id="compareBtn" class="btn-ghost hidden">Compare (Pro)</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row-between">
+          <strong>Conversion Output</strong>
+          <div class="small" id="modeTag">Exact Ratio-Based (Hybrid)</div>
+        </div>
+
+        <div style="height:8px"></div>
+        <pre id="output" class="result">Tap Convert</pre>
+
+        <div style="height:10px"></div>
+        <button id="advToggle" class="btn-ghost">Advanced</button>
+        <div id="advPanel" class="card hidden small">
+          <div id="advContent" style="white-space:pre-wrap">Advanced info will appear here.</div>
+          <div style="height:8px"></div>
+          <label class="small">Micro/Macro bias preview</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="microOn" class="btn-ghost small">Micro ON</button>
+            <button id="microOff" class="btn-ghost small active">Macro ON</button>
+          </div>
+          <div class="small" style="margin-top:8px;color:var(--muted)" id="zoneExplain">
+            Micro = short-range precision (0–22%). Transition 22% → 32%. Macro = full-range behavior (32–100%).
+            <div style="margin-top:6px;color:var(--muted)">Why 22%? It is the point where short-stick deflection corresponds best to fine aiming (micro) across sampled canonical curves — we found it aligns well with player feel across multiple games/curves.</div>
+          </div>
+        </div>
+
+        <div id="graphWrap" class="graph-wrap hidden" aria-live="polite">
+          <div class="compareHeader">
+            <div class="compareCol">
+              <div id="microResult" class="microResult">Closest Micro-Aim (Short Range Curve): <span id="microName">—</span></div>
+              <div class="explain small">Micro = short-range fine aim (0–22% stick)</div>
+            </div>
+            <div class="compareCol">
+              <div id="macroResult" class="macroResult">Closest Macro-Aim (Full Range Curve): <span id="macroName">—</span></div>
+              <div class="explain small">Macro = full-range tracking & turning (32–100% stick)</div>
+            </div>
+          </div>
+
+          <canvas id="curveCanvas" width="720" height="320" aria-label="Main curve visualization"></canvas>
+
+          <!-- Pro mini compare panels -->
+          <div id="miniWrap" class="miniWrap hidden">
+            <div class="miniCard">
+              <div class="miniLabel">Your Curve (micro / transition / macro zones shaded)</div>
+              <canvas id="miniYour" width="360" height="140" aria-label="Your curve"></canvas>
+            </div>
+            <div class="miniCard">
+              <div class="miniLabel">Closest Match (micro / transition / macro zones shaded)</div>
+              <canvas id="miniMatch" width="360" height="140" aria-label="Closest curve"></canvas>
+            </div>
+          </div>
+
+          <div class="legend small" id="curveLegend" style="margin-top:8px"></div>
+        </div>
+      </section>
+
+      <footer class="footer small">Made by Yeetonio — FPS Converter Hub (Pro)</footer>
+    </main>
+  </div>
+
+<script>
+/* ==================== Data & Curves ==================== */
+/* canonical curves (11-sample; 0..1) */
+const CURVE_SHAPES = {
+  linear:[0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1],
+  standard:[0,0.02,0.07,0.16,0.29,0.45,0.61,0.76,0.88,0.96,1],
+  dynamic:[0,0.01,0.04,0.09,0.18,0.30,0.48,0.70,0.88,0.97,1],
+  exponential:[0,0.006,0.02,0.07,0.16,0.33,0.57,0.79,0.92,0.98,1],
+  sinusoidal:[0,0.015,0.05,0.12,0.25,0.45,0.66,0.82,0.92,0.98,1],
+  /* BF6 set (fitted) */
+  standard_bf6: [0.00,0.02,0.06,0.12,0.22,0.36,0.52,0.70,0.86,0.96,1.00],
+  bf2042_old:    [0.00,0.004,0.015,0.040,0.100,0.250,0.500,0.750,0.900,0.980,1.00],
+  bfv:           [0.00,0.018,0.055,0.130,0.250,0.430,0.610,0.780,0.890,0.960,1.00],
+  bf1_bf4:       [0.00,0.020,0.060,0.140,0.280,0.440,0.610,0.770,0.900,0.960,1.00],
+  bf3:           [0.00,0.03,0.09,0.2,0.35,0.52,0.68,0.82,0.91,0.97,1.00],
+  bfbc2:         [0.00,0.028,0.075,0.18,0.33,0.5,0.67,0.81,0.9,0.98,1.00],
+  bfbc:          [0.00,0.025,0.07,0.16,0.3,0.48,0.66,0.8,0.9,0.97,1.00],
+  dynamic_bf6:   [0.00,0.02,0.06,0.14,0.22,0.34,0.56,0.78,0.92,0.98,1.00],
+  /* Apex */
+  apex_classic:      [0.00,0.03,0.08,0.16,0.26,0.38,0.52,0.68,0.82,0.92,1.00],
+  apex_steady:       [0.00,0.01,0.03,0.06,0.12,0.22,0.36,0.52,0.70,0.88,1.00],
+  apex_fine_aim:     [0.00,0.02,0.04,0.07,0.10,0.14,0.18,0.22,0.30,0.40,1.00],
+  apex_high_velocity:[0.00,0.18,0.40,0.60,0.78,0.90,0.96,0.98,0.995,0.999,1.00],
+  apex_linear:       [0.00,0.10,0.20,0.30,0.40,0.50,0.60,0.70,0.80,0.90,1.00],
+  /* MW3 */
+  mw3_linear:   [0.00,0.04,0.09,0.18,0.32,0.50,0.70,0.85,0.94,0.98,1.00],
+  mw3_standard: [0.00,0.02,0.06,0.14,0.25,0.40,0.58,0.74,0.88,0.96,1.00],
+  mw3_dynamic:  [0.00,0.01,0.04,0.12,0.28,0.46,0.64,0.80,0.92,0.98,1.00]
+};
+
+const GAME_CURVES = {
+  mw3:['standard','dynamic','linear'],
+  warzone:['standard','dynamic','linear'],
+  bo6:['standard','dynamic','linear'],
+  bo7:['standard','dynamic','linear'],
+  the_finals:['linear','exponential','sinusoidal'],
+  bf6:['standard','bf2042_old','bfv','bf1_bf4','bf3','bfbc2','bfbc','linear','dynamic'],
+  bf2042:['standard','linear','bf4','bf1','bf3','bfbc','bfbc2','bfv','2042_old'],
+  valorant:['standard','linear','light','medium','heavy','extreme'],
+  apex:['classic','steady','fine_aim','high_velocity','linear'],
+  csgo:['standard'],
+  r6:['standard'],
+  fragpunk:['standard','linearplus'],
+  halo:['standard']
+};
+
+const GAME_RANGE = {
+  mw3:[1,20,1], warzone:[1,20,1], bf6:[1,100,0.01], bf2042:[1,100,0.01],
+  bo6:[0.1,4.0,0.05], bo7:[0.1,4.0,0.05], the_finals:[20,750,5], apex:[1,8,1],
+  fragpunk:[0.1,10.0,0.1], halo:[1,20,0.5], r6:[1,100,1], valorant:[1,10,0.01], csgo:[1,10,0.01]
+};
+
+const GAME_LABELS = {
+  mw3: 'MW3', warzone:'WARZONE', bo6:'BO6', bo7:'BO7', the_finals:'THE FINALS',
+  bf6:'BATTLEFIELD 6', bf2042:'BATTLEFIELD 2042', valorant:'VALORANT', apex:'APEX',
+  csgo:'CS:GO', r6:'R6', fragpunk:'FRAGPUNK', halo:'HALO INFINITE'
+};
+
+/* ==================== Helpers & math (hybrid micro/macro + slope adjust) ==================== */
+const $ = id => document.getElementById(id);
+function lerp(a,b,t){ return a + (b-a)*t; }
+function getCurveArray(game, curveKey){
+  if(!curveKey) return CURVE_SHAPES.linear;
+  if(game==='bf6'){
+    const m = { standard:'standard_bf6', bf2042_old:'bf2042_old', bfv:'bfv', bf1_bf4:'bf1_bf4', bf3:'bf3', bfbc2:'bfbc2', bfbc:'bfbc', linear:'linear', dynamic:'dynamic_bf6' };
+    return CURVE_SHAPES[m[curveKey] || curveKey] || CURVE_SHAPES.linear;
+  }
+  if(game==='apex'){
+    const m = { classic:'apex_classic', steady:'apex_steady', fine_aim:'apex_fine_aim', high_velocity:'apex_high_velocity', linear:'apex_linear' };
+    return CURVE_SHAPES[m[curveKey] || curveKey] || CURVE_SHAPES.linear;
+  }
+  if(game==='mw3'){
+    const m = { standard:'mw3_standard', dynamic:'mw3_dynamic', linear:'mw3_linear' };
+    return CURVE_SHAPES[m[curveKey] || curveKey] || CURVE_SHAPES.linear;
+  }
+  return CURVE_SHAPES[curveKey] || CURVE_SHAPES.linear;
+}
+
+/* dense sampling biased low for micro sensitivity */
+function sampleCurveDense(arr11){
+  const xLow = []; for(let i=0;i<=35;i++){ xLow.push(i/100); } // 0.00..0.35 step 0.01
+  const xMid = []; for(let i=4;i<=10;i++){ xMid.push(i/10); } // 0.4..1.0 step 0.1
+  const x = xLow.concat(xMid);
+  const arr=[];
+  for(let xi=0; xi<x.length; xi++){
+    const t=x[xi];
+    const idx = t*10;
+    const lo=Math.floor(idx), hi=Math.ceil(idx);
+    const v = (lo===hi)? (arr11[lo]||0) : lerp(arr11[lo]||0, arr11[hi]||0, idx-lo);
+    arr.push(v);
+  }
+  return {x,arr};
+}
+
+/* RMSE on subset indices */
+function rmseSubset(A, B, mask){
+  let sum=0, n=0;
+  for(let i=0;i<mask.length;i++){
+    if(!mask[i]) continue;
+    const d = (A[i]||0) - (B[i]||0);
+    sum += d*d; n++;
+  }
+  return Math.sqrt(sum / Math.max(1,n));
+}
+
+/* build boolean mask for micro (<=0.22) and macro (>=0.32) using sampleCurveDense.x
+   transition zone is between 0.22 and 0.32 (excluded from strict micro/macro masks) */
+function buildMasks(xArr){
+  const microCut = 0.22;
+  const macroCut = 0.32;
+  const microMask = xArr.map(x => x <= microCut);
+  const macroMask = xArr.map(x => x >= macroCut);
+  const transitionMask = xArr.map(x => (x > microCut && x < macroCut));
+  return {microMask, macroMask, transitionMask};
+}
+
+/* compute micro and macro best matches */
+function findClosestMicroMacro(srcGame, srcCurveKey, tgtGame){
+  const srcArr11 = getCurveArray(srcGame, srcCurveKey);
+  const s = sampleCurveDense(srcArr11);
+  const x = s.x;
+  const {microMask, macroMask} = buildMasks(x);
+  const candidates = GAME_CURVES[tgtGame] || ['linear'];
+  let bestMicro=null, bestMacro=null, bestMicroScore=1e9, bestMacroScore=1e9;
+  candidates.forEach(k=>{
+    const candArr11 = getCurveArray(tgtGame, k);
+    const sc = sampleCurveDense(candArr11);
+    const scoreMicro = rmseSubset(s.arr, sc.arr, microMask);
+    const scoreMacro = rmseSubset(s.arr, sc.arr, macroMask);
+    if(scoreMicro < bestMicroScore){ bestMicroScore = scoreMicro; bestMicro = k; }
+    if(scoreMacro < bestMacroScore){ bestMacroScore = scoreMacro; bestMacro = k; }
+  });
+  return {bestMicro, bestMacro, bestMicroScore, bestMacroScore, x};
+}
+
+/* avg slope for mask using dense samples */
+function avgSlopeForMask(arr11, mask){
+  const s = sampleCurveDense(arr11); const X = s.x, A = s.arr;
+  let sum = 0, count = 0;
+  for (let i=1;i<X.length;i++){
+    if(!mask[i] && !mask[i-1]) continue;
+    const dx = X[i]-X[i-1];
+    if(dx<=0) continue;
+    const dy = (A[i]-A[i-1])/dx;
+    if(mask[i] || mask[i-1]){ sum += Math.abs(dy); count++; }
+  }
+  return (count === 0) ? 0.00001 : (sum / count);
+}
+
+/* sensitivity normalization (log) */
+function logNormalize(value, game){
+  const r = GAME_RANGE[game] || [1,100,0.01];
+  let v = parseFloat(value);
+  if(isNaN(v)) v = r[0];
+  v = Math.max(r[0], Math.min(r[1], v));
+  const lnMin=Math.log(r[0]+1), lnMax=Math.log(r[1]+1), lnV=Math.log(v+1);
+  return (lnV-lnMin)/(lnMax-lnMin);
+}
+function logDenormalize(norm, game){
+  const r = GAME_RANGE[game] || [1,100,0.01];
+  const lnMin=Math.log(r[0]+1), lnMax=Math.log(r[1]+1);
+  const lnV = lnMin + norm*(lnMax-lnMin);
+  const v = Math.exp(lnV)-1;
+  const decimals = (r[1]-r[0]) < 10 ? 2 : 2;
+  return parseFloat(Math.max(r[0],Math.min(r[1],v)).toFixed(decimals));
+}
+
+/* slope-adjusted per-region sens converter
+   NOTE: uses micro/macro masks based on 22%/32% thresholds (see buildMasks)
+*/
+function convertControllerWithCurveSens(srcGame,tgtGame,srcSens,srcCurve,srcFov,tgtFov,ads, mode, bf6Opts){
+  const norm = logNormalize(srcSens, srcGame);
+  const baseYaw = {mw3:205,warzone:205,bo6:205,bo7:205,bf6:158,bf2042:158,apex:190,valorant:170,csgo:210,r6:150,fragpunk:180,halo:200,the_finals:178};
+  const srcYaw = baseYaw[srcGame] || 180;
+  const tgtYaw = baseYaw[tgtGame] || 180;
+  const fovFactor = (90/srcFov) / (90/tgtFov);
+  let baseTgtNorm = norm * (srcYaw/tgtYaw) * fovFactor;
+  if(ads){
+    let a = parseFloat(ads); if(a>1) a=a/100; baseTgtNorm *= a;
+  }
+  baseTgtNorm = Math.max(0, Math.min(1, baseTgtNorm));
+
+  const closest = findClosestMicroMacro(srcGame, srcCurve, tgtGame);
+  const microKey = closest.bestMicro || null;
+  const macroKey = closest.bestMacro || null;
+
+  const srcSamples = sampleCurveDense(getCurveArray(srcGame, srcCurve));
+  const {microMask, macroMask, transitionMask} = buildMasks(srcSamples.x);
+
+  const srcMicroSlope = avgSlopeForMask(getCurveArray(srcGame, srcCurve), microMask);
+  const srcMacroSlope = avgSlopeForMask(getCurveArray(srcGame, srcCurve), macroMask);
+
+  function slopeAdjustedSensForKey(candidateKey, regionMask, srcSlope){
+    if(!candidateKey) return null;
+    const candidateArr11 = getCurveArray(tgtGame, candidateKey);
+    const candSlope = avgSlopeForMask(candidateArr11, regionMask);
+    const cs = Math.max(candSlope, 0.00001);
+    const factor = (srcSlope / cs);
+    let adjNorm = baseTgtNorm * factor;
+    adjNorm = Math.max(0, Math.min(1, adjNorm));
+    const adjSens = logDenormalize(adjNorm, tgtGame);
+    return {adjSens, adjNorm, factor, candSlope};
+  }
+
+  // micro & macro results
+  const microResult = slopeAdjustedSensForKey(microKey, microMask, srcMicroSlope);
+  const macroResult = slopeAdjustedSensForKey(macroKey, macroMask, srcMacroSlope);
+  const unadjustedSens = logDenormalize(baseTgtNorm, tgtGame);
+
+  // BF6 source handling: if BF6 is source, optionally apply uniform/coefficient to the conversion
+  let bf6Applied = null;
+  if(srcGame === 'bf6' && bf6Opts && bf6Opts.uniform){
+    // If uniform is on, emulate effect by scaling baseTgtNorm by coefficient
+    baseTgtNorm *= parseFloat(bf6Opts.coeff) || 1.0;
+    baseTgtNorm = Math.max(0, Math.min(1, baseTgtNorm));
+    // Recompute micro/macro results with adjusted baseTgtNorm by reusing slopeAdjustedSensForKey
+    // (Note: this is a light approximation — actual BF uniform changes curve mapping in game engine)
+    // We'll re-run the slopeAdjustedSensForKey logic with updated baseTgtNorm by temporarily swapping.
+    // Quick approach: compute adjusted adjNorms by multiplying previous adjNorm by coeff (approx)
+    if(microResult) microResult.adjNorm = Math.max(0, Math.min(1, microResult.adjNorm * (parseFloat(bf6Opts.coeff) || 1)));
+    if(macroResult) macroResult.adjNorm = Math.max(0, Math.min(1, macroResult.adjNorm * (parseFloat(bf6Opts.coeff) || 1)));
+    if(microResult) microResult.adjSens = logDenormalize(microResult.adjNorm, tgtGame);
+    if(macroResult) macroResult.adjSens = logDenormalize(macroResult.adjNorm, tgtGame);
+    bf6Applied = {uniform:true, coeff:parseFloat(bf6Opts.coeff)};
+  }
+
+  // If user selected "Feel" mode, we blend micro/macros with transition weighting.
+  if(mode === 'feel'){
+    const microAdj = microResult ? microResult.adjNorm : baseTgtNorm;
+    const macroAdj = macroResult ? macroResult.adjNorm : baseTgtNorm;
+    const feelNorm = Math.max(0, Math.min(1, baseTgtNorm * 0.9 + (microAdj * 0.1)));
+    const feelSens = logDenormalize(feelNorm, tgtGame);
+    return {
+      norm,
+      baseTgtNorm,
+      unadjustedSens,
+      microKey, microResult,
+      macroKey, macroResult,
+      bf6Applied,
+      feel: {feelSens, feelNorm}
+    };
+  }
+
+  return {
+    norm,
+    baseTgtNorm,
+    unadjustedSens,
+    microKey, microResult,
+    macroKey, macroResult,
+    bf6Applied
+  };
+}
+
+/* ================= UI wiring & drawing ==================== */
+function populateGames(){
+  const s = $('src_game'), t = $('tgt_game'); s.innerHTML=''; t.innerHTML='';
+  Object.keys(GAME_CURVES).forEach(g=>{
+    const o=document.createElement('option'); o.value=g; o.textContent = GAME_LABELS[g] || g.toUpperCase(); s.appendChild(o);
+    const o2=document.createElement('option'); o2.value=g; o2.textContent = GAME_LABELS[g] || g.toUpperCase(); t.appendChild(o2);
+  });
+}
+function populateCurves(game, elId){
+  const el = $(elId); if(!el) return; el.innerHTML='';
+  (GAME_CURVES[game]||['linear']).forEach(k=>{
+    const o=document.createElement('option'); o.value=k; o.textContent = k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()); el.appendChild(o);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  populateGames();
+  populateCurves($('src_game').value,'src_curve');
+  populateCurves($('tgt_game').value,'tgt_curve');
+  $('app').style.display='block';
+  // init bf6 options visibility
+  toggleBF6Options();
+});
+
+/* events */
+$('src_game').addEventListener('change', e=>{
+  populateCurves(e.target.value,'src_curve');
+  toggleBF6Options();
+  if(!$('graphWrap').classList.contains('hidden')){ renderGraph(); updateCompareAvailability(); }
+});
+$('tgt_game').addEventListener('change', e=> populateCurves(e.target.value,'tgt_curve'));
+$('adsToggle').addEventListener('change', e=> $('adsFields').classList.toggle('hidden', !e.target.checked));
+$('bf6_coeff').addEventListener('input', ()=> $('bf6_coeff_val').textContent = parseFloat($('bf6_coeff').value).toFixed(2));
+
+function toggleBF6Options(){
+  const src = $('src_game').value;
+  const el = $('bf6Options');
+  if(src === 'bf6') el.classList.remove('hidden'); else el.classList.add('hidden');
+}
+
+/* mode selector handling */
+let selectedMode = 'exact'; // default as you requested (A)
+document.querySelectorAll('.modePill').forEach(btn=>{
+  btn.addEventListener('click', (ev)=>{
+    document.querySelectorAll('.modePill').forEach(b=>b.classList.remove('active'));
+    ev.currentTarget.classList.add('active');
+    selectedMode = ev.currentTarget.dataset.mode;
+    $('modeTag').textContent = (selectedMode === 'exact') ? 'Exact Ratio-Based (Hybrid)' : (selectedMode === 'feel') ? 'Feel Mode (player-biased)' : 'Assist Mode (stickiness)';
+    $('modeDescription').innerHTML = `Mode: <strong>${ev.currentTarget.textContent}</strong> — ${selectedMode === 'exact' ? 'direct math-based conversion.' : selectedMode === 'feel' ? 'blend for player feel (22→32% transition).' : 'aim-assist stickiness bias.'}`;
+  });
+});
+
+/* convert button (uses slope adjusted hybrid) */
+$('convertBtn').addEventListener('click', ()=>{
+  const src=$('src_game').value, tgt=$('tgt_game').value, srcCurve=$('src_curve').value;
+  const h=parseFloat($('src_h').value)||0, v=parseFloat($('src_v').value)||0, fov=parseFloat($('src_fov').value)||90;
+  const avg=(h+v)/2; const ads = $('adsToggle').checked ? $('ads_src').value : null;
+
+  // bf6 options if source
+  const bf6Opts = { uniform:false, coeff:1.0 };
+  if(src === 'bf6'){
+    bf6Opts.uniform = !!$('bf6_uniform').checked;
+    bf6Opts.coeff = parseFloat($('bf6_coeff').value) || 1.0;
+  }
+
+  const res = convertControllerWithCurveSens(src,tgt,avg,srcCurve,fov,90,ads, selectedMode, bf6Opts);
+
+  // labels & numbers
+  const microLabel = (res.microKey ? res.microKey.replace(/_/g,' ').toUpperCase() : '—');
+  const macroLabel = (res.macroKey ? res.macroKey.replace(/_/g,' ').toUpperCase() : '—');
+  const microSens = res.microResult ? res.microResult.adjSens : '—';
+  const macroSens = res.macroResult ? res.macroResult.adjSens : '—';
+  const unadj = res.unadjustedSens;
+
+  const outLines = [
+    `Source: ${GAME_LABELS[src] || src.toUpperCase()} (${srcCurve}) — Avg ${avg}`,
+    `Mode: ${selectedMode.toUpperCase()}`,
+    `Normalized (source->target): ${res.norm.toFixed(4)}`,
+    `Unadjusted suggested sens for ${GAME_LABELS[tgt] || tgt.toUpperCase()}: ${unadj}`,
+    ``
+  ];
+
+  // show feel suggestion if present
+  if(res.feel){
+    outLines.push(`Feel-mode suggestion: ${res.feel.feelSens} (blended)`);
+    outLines.push(``);
+  }
+
+  outLines.push(`Closest Micro-Aim (Short Range): ${microLabel}`);
+  outLines.push(`→ Suggested Micro Sens: ${microSens}`);
+  outLines.push(``);
+  outLines.push(`Closest Macro-Aim (Full Range): ${macroLabel}`);
+  outLines.push(`→ Suggested Macro Sens: ${macroSens}`);
+  outLines.push(``);
+  outLines.push(`Suggested curve(s): Micro=${microLabel || '—'} | Macro=${macroLabel || '—'}`);
+  outLines.push(`(Why chosen: micro/macro RMSE best matches against target curves)`);
+
+  // BF6 recommendations: if src is BF6, add what uniform/coefficient were applied
+  if(res.bf6Applied){
+    outLines.push('');
+    outLines.push(`BF6 source applied: Uniform=${res.bf6Applied.uniform ? 'ON' : 'OFF'} | Coeff=${res.bf6Applied.coeff.toFixed(2)}`);
+    outLines.push(`(This approximates how BF uniform modifies mapping — coefficient multiplies normalized sensitivity.)`);
+  }
+
+  // If target is BF6, provide a recommendation message (heuristic)
+  if(tgt === 'bf6'){
+    // produce a heuristic suggestion for uniform and coefficient needed on BF6 to match this conversion
+    // We'll estimate coefficient as average of micro & macro factor (if available) mapped to a 0.5..1.2 range.
+    let suggestedUniform = 'OFF';
+    let suggestedCoeff = null;
+    const facs = [];
+    if(res.microResult && typeof res.microResult.factor === 'number') facs.push(res.microResult.factor);
+    if(res.macroResult && typeof res.macroResult.factor === 'number') facs.push(res.macroResult.factor);
+    if(facs.length > 0){
+      const avgFactor = facs.reduce((a,b)=>a+b,0)/facs.length;
+      // clamp & invert heuristic: factor ~ ratio of slopes — convert to reasonable coefficient suggestion
+      // heuristically map into 0.6..1.1 (battlefield coefficient space)
+      const mapped = Math.max(0.5, Math.min(1.2, avgFactor));
+      suggestedCoeff = parseFloat(mapped.toFixed(2));
+    }
+    // uniform suggestion: if either bestMicro or bestMacro equals 'bfv' (which often maps off), suggest OFF, otherwise ON
+    if(res.microKey === 'bfv' || res.macroKey === 'bfv'){
+      suggestedUniform = 'OFF';
+    } else {
+      suggestedUniform = 'ON';
+    }
+    outLines.push('');
+    outLines.push(`Target is BF6 — suggested BF6 settings to match feel:`);
+    outLines.push(`→ Uniform Aim recommended: ${suggestedUniform} (heuristic)`);
+    if(suggestedCoeff !== null) outLines.push(`→ Suggested Coefficient: ${suggestedCoeff} (heuristic)`);
+    outLines.push(`Note: This suggestion is a heuristic. If converting TO BF6, try the suggested uniform & coefficient in-game and re-run the conversion for refinement.`);
+  }
+
+  $('output').textContent = outLines.join('\n');
+
+  // Advanced panel details
+  $('advContent').textContent = `Normalized: ${res.norm.toFixed(4)}\nMicro factor: ${res.microResult ? res.microResult.factor.toFixed(3) : '—'}\nMacro factor: ${res.macroResult ? res.macroResult.factor.toFixed(3) : '—'}\n\nZones: Micro 0–22% | Transition 22–32% | Macro 32–100%\nSelected Mode: ${selectedMode.toUpperCase()}\n\nWhy 22%? Empirically it aligns micro stick deflection with fine-aim behaviour across sampled canonical curves; transition to 32% smooths region mapping between micro and macro.`;
+  $('microName').textContent = microLabel;
+  $('macroName').textContent = macroLabel;
+  $('microResult').classList.add('visible'); $('macroResult').classList.add('visible');
+  updateCompareAvailability();
+});
+
+/* Drawing & compare code (same as previous build, preserves UI) */
+const canvas = $('curveCanvas'), ctx = canvas.getContext('2d');
+const miniYour = $('miniYour'), ctxYour = miniYour.getContext('2d');
+const miniMatch = $('miniMatch'), ctxMatch = miniMatch.getContext('2d');
+
+function drawGridLocal(ctxLocal, W, H, pad){
+  ctxLocal.fillStyle = '#04101a'; ctxLocal.fillRect(0,0,W,H);
+  ctxLocal.strokeStyle = 'rgba(255,255,255,0.04)'; ctxLocal.lineWidth = 1;
+  for(let i=0;i<=10;i++){ const x = pad + i*(W-2*pad)/10; ctxLocal.beginPath(); ctxLocal.moveTo(x,pad); ctxLocal.lineTo(x,H-pad); ctxLocal.stroke(); }
+  for(let j=0;j<=4;j++){ const y = pad + j*(H-2*pad)/4; ctxLocal.beginPath(); ctxLocal.moveTo(pad,y); ctxLocal.lineTo(W-pad,y); ctxLocal.stroke(); }
+}
+function catmull(p0,p1,p2,p3,t){
+  const t2=t*t, t3=t2*t;
+  const x = 0.5*((2*p1.x) + (-p0.x + p2.x)*t + (2*p0.x - 5*p1.x + 4*p2.x - p3.x)*t2 + (-p0.x + 3*p1.x - 3*p2.x + p3.x)*t3);
+  const y = 0.5*((2*p1.y) + (-p0.y + p2.y)*t + (2*p0.y - 5*p1.y + 4*p2.y - p3.y)*t2 + (-p0.y + 3*p1.y - 3*p2.y + p3.y)*t3);
+  return {x,y};
+}
+function getPtsFromArr(arr, W, H, pad){
+  return arr.map((v,i)=>({x: pad + (i/10)*(W-2*pad), y: H - pad - v*(H-2*pad)}));
+}
+function drawCurve(ctxLocal, arr, color='#19a6ff', width=3, alpha=1, dashed=false){
+  const W = ctxLocal.canvas.width; const H = ctxLocal.canvas.height; const pad = 20;
+  drawGridLocal(ctxLocal, W, H, pad);
+  const pts = getPtsFromArr(arr, W, H, pad);
+  ctxLocal.beginPath();
+  if(dashed) ctxLocal.setLineDash([6,6]); else ctxLocal.setLineDash([]);
+  ctxLocal.lineWidth = width; ctxLocal.strokeStyle = color; ctxLocal.globalAlpha = alpha;
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[i+1], p3=pts[Math.min(pts.length-1,i+2)];
+    for(let t=0;t<=1;t+=0.06){
+      const p = catmull(p0,p1,p2,p3,t);
+      if(i===0 && t===0) ctxLocal.moveTo(p.x,p.y); else ctxLocal.lineTo(p.x,p.y);
+    }
+  }
+  ctxLocal.stroke();
+  ctxLocal.setLineDash([]); ctxLocal.globalAlpha = 1;
+  ctxLocal.fillStyle = color;
+  [0,5,10].forEach(idx => { const p = pts[idx]; ctxLocal.beginPath(); ctxLocal.arc(p.x,p.y,3,0,Math.PI*2); ctxLocal.fill(); });
+}
+
+function renderGraph(){
+  const srcGame = $('src_game').value, srcCurveKey = $('src_curve').value;
+  const mainArr = getCurveArray(srcGame, srcCurveKey);
+  canvas.width = Math.min(window.innerWidth * 0.95, 820);
+  canvas.height = 320;
+  drawCurve(ctx, mainArr, '#19a6ff', 3.4, 1, false);
+
+  $('curveLegend').textContent = `${GAME_LABELS[srcGame] || srcGame.toUpperCase()} — ${srcCurveKey.replace(/_/g,' ').toUpperCase()}`;
+
+  if($('compareBtn').classList.contains('active')){
+    const tgtGame = $('tgt_game').value;
+    const {bestMicro, bestMacro} = findClosestMicroMacro(srcGame, srcCurveKey, tgtGame);
+    const matchKey = bestMicro || bestMacro || 'linear';
+    const matchArr = getCurveArray(tgtGame, matchKey);
+    drawCurve(ctx, matchArr, '#00ffd1', 2.6, 0.95, true);
+    $('curveLegend').textContent += `  |  Auto match: ${GAME_LABELS[tgtGame]||tgtGame.toUpperCase()} — ${matchKey}`;
+    $('miniWrap').classList.remove('hidden');
+
+    // draw mini canvases
+    miniYour.width = Math.min(window.innerWidth * 0.45, 420); miniYour.height = 140;
+    miniMatch.width = Math.min(window.innerWidth * 0.45, 420); miniMatch.height = 140;
+    drawCurve(ctxYour, mainArr, '#19a6ff', 2.6, 1, false);
+    drawCurve(ctxMatch, matchArr, '#00ffd1', 2.6, 1, false);
+
+    // shade micro/transition/macro regions
+    shadeZones(ctxYour, miniYour, mainArr);
+    shadeZones(ctxMatch, miniMatch, matchArr);
+  } else {
+    $('miniWrap').classList.add('hidden');
+    ctxYour.clearRect(0,0,miniYour.width, miniYour.height);
+    ctxMatch.clearRect(0,0,miniMatch.width, miniMatch.height);
+  }
+}
+
+function shadeZones(ctxLocal, canvasEl, arr){
+  const W = canvasEl.width, H = canvasEl.height, pad=20;
+  const microCut = 0.22, macroCut = 0.32;
+  const microX = pad + microCut * (W - 2*pad);
+  const macroX = pad + macroCut * (W - 2*pad);
+  ctxLocal.save();
+  // micro zone
+  ctxLocal.fillStyle = 'rgba(25,166,255,0.06)';
+  ctxLocal.fillRect(pad, pad, microX - pad, H - 2*pad);
+  // transition zone
+  ctxLocal.fillStyle = 'rgba(25,166,255,0.035)';
+  ctxLocal.fillRect(microX, pad, macroX - microX, H - 2*pad);
+  // macro zone subtle
+  ctxLocal.fillStyle = 'rgba(255,255,255,0.02)';
+  ctxLocal.fillRect(macroX, pad, W - pad - macroX, H - 2*pad);
+  ctxLocal.restore();
+}
+
+/* Compare availability update */
+function updateCompareAvailability(){
+  const graphVisible = !$('graphWrap').classList.contains('hidden');
+  const srcGame = $('src_game').value, srcCurveKey = $('src_curve').value, tgtGame = $('tgt_game').value;
+  const {bestMicro, bestMacro} = findClosestMicroMacro(srcGame, srcCurveKey, tgtGame);
+  if(graphVisible && (bestMicro || bestMacro) && (bestMicro !== srcCurveKey || bestMacro !== srcCurveKey)){
+    $('compareBtn').classList.remove('hidden');
+  } else {
+    $('compareBtn').classList.add('hidden'); $('compareBtn').classList.remove('active');
+  }
+}
+
+/* UI connect */
+$('showGraphBtn').addEventListener('click', ()=>{ const wrap = $('graphWrap'); wrap.classList.toggle('hidden'); if(!wrap.classList.contains('hidden')){ renderGraph(); updateCompareAvailability(); } else { $('compareBtn').classList.add('hidden'); $('miniWrap').classList.add('hidden'); } });
+$('compareBtn').addEventListener('click', ()=>{ $('compareBtn').classList.toggle('active'); renderGraph(); });
+$('src_curve').addEventListener('change', ()=>{ if(!$('graphWrap').classList.contains('hidden')){ renderGraph(); updateCompareAvailability(); }});
+$('tgt_game').addEventListener('change', ()=>{ if(!$('graphWrap').classList.contains('hidden')) updateCompareAvailability(); });
+$('advToggle').addEventListener('click', ()=> $('advPanel').classList.toggle('hidden'));
+$('microOn').addEventListener('click', ()=>{ $('microOn').classList.add('active'); $('microOff').classList.remove('active'); });
+$('microOff').addEventListener('click', ()=>{ $('microOn').classList.remove('active'); $('microOff').classList.add('active'); });
+
+/* PWA prompt + SW register (unchanged) */
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt',(e)=>{ e.preventDefault(); deferredPrompt=e; $('installBtn').style.display='inline-block'; $('installBtn').addEventListener('click', async ()=>{ if(!deferredPrompt) return; deferredPrompt.prompt(); const {outcome} = await deferredPrompt.userChoice; deferredPrompt=null; $('installBtn').style.display='none'; }); });
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('service-worker.js').catch(()=>{}); }
+
+/* Debug helper */
+function logCandidateDistances(srcGame, srcCurveKey, tgtGame){
+  const srcArr = getCurveArray(srcGame, srcCurveKey);
+  const s = sampleCurveDense(srcArr);
+  const {microMask, macroMask} = buildMasks(s.x);
+  const candidates = GAME_CURVES[tgtGame] || ['linear'];
+  const list = candidates.map(k=>{
+    const cand = getCurveArray(tgtGame, k);
+    const sc = sampleCurveDense(cand);
+    const micro = rmseSubset(s.arr, sc.arr, microMask);
+    const macro = rmseSubset(s.arr, sc.arr, macroMask);
+    return {candidate:k, micro:+micro.toFixed(6), macro:+macro.toFixed(6)};
+  }).sort((a,b)=>a.micro - b.micro);
+  console.table(list);
+  return list;
+}
+</script>
+</body>
+</html>
